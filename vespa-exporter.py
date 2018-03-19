@@ -27,7 +27,7 @@ def camelcase_convert(name):
 def get_metrics():
     global endpoints
     try:
-        response = requests.get(configurl)
+        response = requests.get(configurl, timeout=2)
         
         try:
             model = json.loads(response.text)
@@ -60,7 +60,7 @@ def get_searchnode_metrics(hostport):
     (host, port) = hostport.split(':')
     url = 'http://' + host + ':' + port + '/state/v1/metrics'
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=2)
 
         try:
             m = json.loads(response.text)
@@ -116,7 +116,7 @@ def get_container_metrics(hostport):
     url = 'http://' + host + ':' + port + '/state/v1/metrics'
 
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=2)
 
         try:
             m = json.loads(response.text)
