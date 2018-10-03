@@ -40,10 +40,10 @@ def get_metrics():
             for service in host['services']:
                 for port in service['ports']:
                     if 'http' in port['tags'].split(' ') and 'state' in port['tags'].split(' '):
-                        if service['name'] in endpoints:
-                            endpoints[service['name']].append(host['name']+':'+str(port['number']))
+                        if service['type'] in endpoints:
+                            endpoints[service['type']].append(host['name']+':'+str(port['number']))
                         else:
-                            endpoints[service['name']] = [host['name']+':'+str(port['number'])]
+                            endpoints[service['type']] = [host['name']+':'+str(port['number'])]
     except requests.exceptions.RequestException as e:
         logger.error('Request failed (could not update infos from cluster controller %s): %s', config_server, e)
         if not endpoints:
@@ -76,19 +76,19 @@ def get_searchnode_metrics(hostport):
             value = 1
         else:
             value = 0
-        prom_metrics[name].labels(host=host).set(value)
+        prom_metrics[name].labels(host=hostport).set(value)
 
         snapshot_to = m['metrics']['snapshot']['to']
         name = service + '_' + 'snapshot_to'
         if name not in prom_metrics:
             prom_metrics[name] = Gauge(name, 'Snapshot to timestamp', ['host'])
-        prom_metrics[name].labels(host=host).set(snapshot_to)
+        prom_metrics[name].labels(host=hostport).set(snapshot_to)
 
         snapshot_from = m['metrics']['snapshot']['from']
         name = service + '_' + 'snapshot_from'
         if name not in prom_metrics:
             prom_metrics[name] = Gauge(name, 'Snapshot from timestamp', ['host'])
-        prom_metrics[name].labels(host=host).set(snapshot_from)
+        prom_metrics[name].labels(host=hostport).set(snapshot_from)
 
         for v in m['metrics']['values']:
             name = service + '_' + v['name']
@@ -97,7 +97,7 @@ def get_searchnode_metrics(hostport):
             desc = v['description']
             labels = ['aggregation', 'host']
             labelvalues = {}
-            labelvalues['host'] = host
+            labelvalues['host'] = hostport
             for d in ['documenttype', 'field', 'disk', 'operantiontype']:
                 if d in v['dimensions']:
                     labels.append(d)
@@ -131,7 +131,7 @@ def get_container_metrics(hostport):
             desc = name
             labels = ['aggregation', 'host']
             labelvalues = {}
-            labelvalues['host'] = host
+            labelvalues['host'] = hostport
             if 'dimensions' in v:
                 for d in ['chain', 'handler', 'api', 'operation', 'status', 'serverName', 'serverPort']:
                     if d in v['dimensions']:
