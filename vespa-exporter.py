@@ -109,6 +109,7 @@ def get_standardservice_metrics(service_type, hostport):
                 labelvalues['aggregation'] = agg
                 prom_metrics[name].labels(**labelvalues).set(v['values'][agg])
     except requests.exceptions.RequestException as e:
+        prom_metrics[service + '_status_code_up'].labels(host=hostport).set(0)
         logger.error('Request failed (could not update metrics from endpoint %s): %s', hostport, e)
 
 def get_container_metrics(hostport):
