@@ -49,14 +49,15 @@ def get_metrics():
         if not endpoints:
             raise ValueError
 
-    for s in endpoints['searchnode']:
-        get_searchnode_metrics(s)
+    for service_type in ['searchnode', 'distributor']:
+        for service_hostport in endpoints[service_type]:
+            get_standardservice_metrics(service_type, service_hostport)
     for c in endpoints['container']:
         get_container_metrics(c)
 
 
-def get_searchnode_metrics(hostport):
-    service = 'vespa_searchnode'
+def get_standardservice_metrics(service_type, hostport):
+    service = 'vespa_' + service_type
     (host, port) = hostport.split(':')
     url = 'http://' + host + ':' + port + '/state/v1/metrics'
     try:
