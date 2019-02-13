@@ -7,6 +7,7 @@ from prometheus_client import start_http_server, Gauge
 import requests
 import logging
 import re
+from threading import Lock, Thread
 
 http_port = 9426
 
@@ -17,6 +18,8 @@ endpoints = {}
 
 first_cap_re = re.compile('(.)([A-Z][a-z]+)')
 all_cap_re = re.compile('([a-z0-9])([A-Z])')
+
+lock = Lock()
 
 
 def camelcase_convert(name):
@@ -51,9 +54,14 @@ def get_metrics():
 
     for service_type in ['searchnode', 'distributor']:
         for service_hostport in endpoints[service_type]:
-            get_standardservice_metrics(service_type, service_hostport)
+            t = Thread(target=get_standardservice_metrics, args=(service_type, service_hostport))
+            t.daemon = True
+            t.start()
     for c in endpoints['container']:
-        get_container_metrics(c)
+        # The comma after "c" is necessary to specify it's a tuple
+        t = Thread(target=get_container_metrics, args=(c,))
+        t.daemon = True
+        t.start()
 
 
 def get_standardservice_metrics(service_type, hostport):
@@ -103,8 +111,10 @@ def get_standardservice_metrics(service_type, hostport):
                 if d in v['dimensions']:
                     labels.append(d)
                     labelvalues[d] = v['dimensions'][d]
+            lock.acquire()
             if name not in prom_metrics:
                 prom_metrics[name] = Gauge(name, desc, labels)
+            lock.release()
             for agg in v['values']:
                 labelvalues['aggregation'] = agg
                 prom_metrics[name].labels(**labelvalues).set(v['values'][agg])
@@ -139,8 +149,10 @@ def get_container_metrics(hostport):
                     if d in v['dimensions']:
                         labels.append(d.lower())
                         labelvalues[d.lower()] = v['dimensions'][d]
+            lock.acquire()
             if name not in prom_metrics:
                 prom_metrics[name] = Gauge(name, desc, labels)
+            lock.release()
             for agg in v['values']:
                 labelvalues['aggregation'] = agg
                 prom_metrics[name].labels(**labelvalues).set(v['values'][agg])
@@ -165,3 +177,4 @@ if __name__ == '__main__':
                         level=LOG_LEVEL)
     logger = logging.getLogger('vespa-exporter')
     main()
+
