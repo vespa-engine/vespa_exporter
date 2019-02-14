@@ -13,13 +13,21 @@ http_port = 9426
 
 config_server = os.getenv('VESPA_CONFIGSERVER', 'localhost:19071')
 configurl = 'http://' + config_server + '/config/v2/tenant/default/application/default/cloud.config.model/client'
+
 prom_metrics = {}
+prom_metrics_lock = Lock()
+
 endpoints = {}
 
 first_cap_re = re.compile('(.)([A-Z][a-z]+)')
 all_cap_re = re.compile('([a-z0-9])([A-Z])')
 
-lock = Lock()
+
+def ensure_metric_exists(name, description, labels):
+    prom_metrics_lock.acquire()
+    if name not in prom_metrics:
+        prom_metrics[name] = Gauge(name, description, labels)
+    prom_metrics_lock.release()
 
 
 def camelcase_convert(name):
@@ -30,7 +38,7 @@ def camelcase_convert(name):
 def get_metrics():
     global endpoints
     try:
-        response = requests.get(configurl, timeout=2)
+        response = requests.get(configurl, timeout=10)
         
         try:
             model = json.loads(response.text)
@@ -66,10 +74,9 @@ def get_metrics():
 
 def get_standardservice_metrics(service_type, hostport):
     service = 'vespa_' + service_type
-    (host, port) = hostport.split(':')
-    url = 'http://' + host + ':' + port + '/state/v1/metrics'
+    url = 'http://' + hostport + '/state/v1/metrics'
     try:
-        response = requests.get(url, timeout=2)
+        response = requests.get(url, timeout=10)
 
         try:
             m = json.loads(response.text)
@@ -79,8 +86,7 @@ def get_standardservice_metrics(service_type, hostport):
 
         status_code = m['status']['code']
         name = service + '_' + 'status_code_up'
-        if name not in prom_metrics:
-            prom_metrics[name] = Gauge(name, 'Status code up?', ['host'])
+        ensure_metric_exists(name, 'Status code up?', ['host'])
         if status_code == 'up':
             value = 1
         else:
@@ -89,14 +95,12 @@ def get_standardservice_metrics(service_type, hostport):
 
         snapshot_to = m['metrics']['snapshot']['to']
         name = service + '_' + 'snapshot_to'
-        if name not in prom_metrics:
-            prom_metrics[name] = Gauge(name, 'Snapshot to timestamp', ['host'])
+        ensure_metric_exists(name, 'Snapshot to timestamp', ['host'])
         prom_metrics[name].labels(host=hostport).set(snapshot_to)
 
         snapshot_from = m['metrics']['snapshot']['from']
         name = service + '_' + 'snapshot_from'
-        if name not in prom_metrics:
-            prom_metrics[name] = Gauge(name, 'Snapshot from timestamp', ['host'])
+        ensure_metric_exists(name, 'Snapshot from timestamp', ['host'])
         prom_metrics[name].labels(host=hostport).set(snapshot_from)
 
         for v in m['metrics']['values']:
@@ -111,24 +115,21 @@ def get_standardservice_metrics(service_type, hostport):
                 if d in v['dimensions']:
                     labels.append(d)
                     labelvalues[d] = v['dimensions'][d]
-            lock.acquire()
-            if name not in prom_metrics:
-                prom_metrics[name] = Gauge(name, desc, labels)
-            lock.release()
-            for agg in v['values']:
+            ensure_metric_exists(name, desc, labels)
+            for agg, value in v['values'].items():
                 labelvalues['aggregation'] = agg
-                prom_metrics[name].labels(**labelvalues).set(v['values'][agg])
+                prom_metrics[name].labels(**labelvalues).set(value)
     except requests.exceptions.RequestException as e:
+        ensure_metric_exists(service + '_status_code_up', 'Status code up?', ['host'])
         prom_metrics[service + '_status_code_up'].labels(host=hostport).set(0)
         logger.error('Request failed (could not update metrics from endpoint %s): %s', hostport, e)
 
 def get_container_metrics(hostport):
     service = 'vespa_container'
-    (host, port) = hostport.split(':')
-    url = 'http://' + host + ':' + port + '/state/v1/metrics'
+    url = 'http://' + hostport + '/state/v1/metrics'
 
     try:
-        response = requests.get(url, timeout=2)
+        response = requests.get(url, timeout=10)
 
         try:
             m = json.loads(response.text)
@@ -149,13 +150,10 @@ def get_container_metrics(hostport):
                     if d in v['dimensions']:
                         labels.append(d.lower())
                         labelvalues[d.lower()] = v['dimensions'][d]
-            lock.acquire()
-            if name not in prom_metrics:
-                prom_metrics[name] = Gauge(name, desc, labels)
-            lock.release()
-            for agg in v['values']:
+            ensure_metric_exists(name, desc, labels)
+            for agg, value in v['values'].items():
                 labelvalues['aggregation'] = agg
-                prom_metrics[name].labels(**labelvalues).set(v['values'][agg])
+                prom_metrics[name].labels(**labelvalues).set(value)
 
     except requests.exceptions.RequestException as e:
         logger.error('Request failed (could not update metrics from endpoint %s): %s', hostport, e)
