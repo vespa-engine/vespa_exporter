@@ -12,7 +12,7 @@ from threading import Lock, Thread
 http_port = 9426
 
 config_server = os.getenv('VESPA_CONFIGSERVER', 'localhost:19071')
-configurl = 'http://' + config_server + '/config/v2/tenant/default/application/default/cloud.config.model/client'
+config_url = 'http://' + config_server + '/config/v2/tenant/default/application/default/cloud.config.model/client'
 
 prom_metrics = {}
 prom_metrics_lock = Lock()
@@ -23,7 +23,7 @@ first_cap_re = re.compile('(.)([A-Z][a-z]+)')
 all_cap_re = re.compile('([a-z0-9])([A-Z])')
 
 
-def ensure_metric_exists(name, description, labels):
+def ensure_metric_exists(name, description, labels=()):
     prom_metrics_lock.acquire()
     if name not in prom_metrics:
         prom_metrics[name] = Gauge(name, description, labels)
@@ -35,10 +35,34 @@ def camelcase_convert(name):
     return all_cap_re.sub(r'\1_\2', s1).lower()
 
 
+def expose_status_code(parsed_json, service_name, host_port):
+    status_code = parsed_json['status']['code']
+    name = service_name + '_' + 'status_code_up'
+    ensure_metric_exists(name, 'Status code up?', ['host'])
+    if status_code == 'up':
+        value = 1
+    else:
+        value = 0
+    prom_metrics[name].labels(host=host_port).set(value)
+
+
+def expose_snapshot(parsed_json, service_name, host_port):
+    snapshot_to = parsed_json['metrics']['snapshot']['to']
+    name = service_name + '_' + 'snapshot_to'
+    ensure_metric_exists(name, 'Snapshot to timestamp', ['host'])
+    prom_metrics[name].labels(host=host_port).set(snapshot_to)
+
+    snapshot_from = parsed_json['metrics']['snapshot']['from']
+    name = service_name + '_' + 'snapshot_from'
+    ensure_metric_exists(name, 'Snapshot from timestamp', ['host'])
+    prom_metrics[name].labels(host=host_port).set(snapshot_from)
+
+
 def get_metrics():
     global endpoints
+    get_application_generation()
     try:
-        response = requests.get(configurl, timeout=10)
+        response = requests.get(config_url, timeout=10)
         
         try:
             model = json.loads(response.text)
@@ -72,11 +96,32 @@ def get_metrics():
         t.start()
 
 
+def get_application_generation():
+    application_generation_url = 'http://' + config_server + '/application/v2/tenant/default/application/default'
+    try:
+        response = requests.get(application_generation_url, timeout=10)
+
+        try:
+            model = json.loads(response.text)
+        except ValueError as e:
+            logger.error('JSON parse of application generation failed from %s: %s', config_server, e)
+            raise ValueError
+
+        ensure_metric_exists('vespa_application_generation', 'The generation of the deployed application.')
+        prom_metrics['vespa_application_generation'].set(model["generation"])
+
+    except requests.exceptions.RequestException as e:
+        logger.error('Request failed (could not get application generation from config server %s): %s', config_server, e)
+
+
 def get_standardservice_metrics(service_type, hostport):
     service = 'vespa_' + service_type
     url = 'http://' + hostport + '/state/v1/metrics'
     try:
         response = requests.get(url, timeout=10)
+
+        ensure_metric_exists(service + '_exporter_http_fetch_failed', 'The exporter HTTP request to fetch the metrics failed.', ['host'])
+        prom_metrics[service + '_exporter_http_fetch_failed'].labels(host=hostport).set(0)
 
         try:
             m = json.loads(response.text)
@@ -84,24 +129,9 @@ def get_standardservice_metrics(service_type, hostport):
             logger.error('JSON parse failed.')
             raise ValueError
 
-        status_code = m['status']['code']
-        name = service + '_' + 'status_code_up'
-        ensure_metric_exists(name, 'Status code up?', ['host'])
-        if status_code == 'up':
-            value = 1
-        else:
-            value = 0
-        prom_metrics[name].labels(host=hostport).set(value)
+        expose_status_code(m, service, hostport)
 
-        snapshot_to = m['metrics']['snapshot']['to']
-        name = service + '_' + 'snapshot_to'
-        ensure_metric_exists(name, 'Snapshot to timestamp', ['host'])
-        prom_metrics[name].labels(host=hostport).set(snapshot_to)
-
-        snapshot_from = m['metrics']['snapshot']['from']
-        name = service + '_' + 'snapshot_from'
-        ensure_metric_exists(name, 'Snapshot from timestamp', ['host'])
-        prom_metrics[name].labels(host=hostport).set(snapshot_from)
+        expose_snapshot(m, service, hostport)
 
         for v in m['metrics']['values']:
             name = service + '_' + v['name']
@@ -120,8 +150,8 @@ def get_standardservice_metrics(service_type, hostport):
                 labelvalues['aggregation'] = agg
                 prom_metrics[name].labels(**labelvalues).set(value)
     except requests.exceptions.RequestException as e:
-        ensure_metric_exists(service + '_status_code_up', 'Status code up?', ['host'])
-        prom_metrics[service + '_status_code_up'].labels(host=hostport).set(0)
+        ensure_metric_exists(service + '_exporter_http_fetch_failed', 'The exporter HTTP request to fetch the metrics failed.', ['host'])
+        prom_metrics[service + '_exporter_http_fetch_failed'].labels(host=hostport).set(1)
         logger.error('Request failed (could not update metrics from endpoint %s): %s', hostport, e)
 
 def get_container_metrics(hostport):
@@ -136,6 +166,10 @@ def get_container_metrics(hostport):
         except ValueError:
             logger.error('JSON parse failed.')
             raise ValueError
+
+        expose_status_code(m, service, hostport)
+
+        expose_snapshot(m, service, hostport)
 
         for v in m['metrics']['values']:
             name = service + '_' + camelcase_convert(v['name'])
@@ -175,4 +209,3 @@ if __name__ == '__main__':
                         level=LOG_LEVEL)
     logger = logging.getLogger('vespa-exporter')
     main()
-
