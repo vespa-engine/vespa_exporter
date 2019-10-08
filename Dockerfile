@@ -1,18 +1,17 @@
-FROM alpine:3.5
+FROM alpine:3.10
 
 RUN apk --update upgrade
 RUN apk add --no-cache --update \
-    python \
-    py-pip \
-  && pip install --upgrade pip \
-  && pip install virtualenv \
+    python3 \
+  && pip3 install --upgrade pip \
+  && pip3 install virtualenv \
   && virtualenv /env
 
 WORKDIR /app
 COPY requirements.txt /app/
 
-RUN /env/bin/pip install -r requirements.txt
+RUN /env/bin/pip3 install -r requirements.txt
 
 COPY vespa-exporter.py /app/
 
-CMD ["/env/bin/python", "/app/vespa-exporter.py"]
+CMD ["/env/bin/python3", "/app/vespa-exporter.py"]
