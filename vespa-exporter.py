@@ -63,7 +63,7 @@ def get_metrics():
     get_application_generation()
     try:
         response = requests.get(config_url, timeout=10)
-        
+
         try:
             model = json.loads(response.text)
         except ValueError:
@@ -180,7 +180,7 @@ def get_container_metrics(hostport):
             labelvalues = {}
             labelvalues['host'] = hostport
             if 'dimensions' in v:
-                for d in ['chain', 'handler', 'api', 'operation', 'status', 'serverName', 'serverPort']:
+                for d in ['chain', 'handler', 'api', 'operation', 'status', 'serverName', 'serverPort', 'httpMethod', 'gcName']:
                     if d in v['dimensions']:
                         labels.append(d.lower())
                         labelvalues[d.lower()] = v['dimensions'][d]
