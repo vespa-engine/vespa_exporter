@@ -180,7 +180,8 @@ def get_container_metrics(hostport):
             labelvalues = {}
             labelvalues['host'] = hostport
             if 'dimensions' in v:
-                for d in ['chain', 'handler', 'api', 'operation', 'status', 'serverName', 'serverPort', 'httpMethod', 'gcName']:
+                for d in ['chain', 'handler', 'api', 'operation', 'status', 'serverName', 'serverPort',
+                          'httpMethod', 'gcName', 'documenttype', 'field', 'rankProfile', 'docidPartition']:
                     if d in v['dimensions']:
                         labels.append(d.lower())
                         labelvalues[d.lower()] = v['dimensions'][d]
